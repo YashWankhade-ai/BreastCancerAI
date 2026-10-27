@@ -1,11 +1,17 @@
 import base64
+import gc
 import io
 import json
 import os
 import time
 
+# Low-memory & CPU-optimized configuration for Render/cloud deployment
+os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["TF_NUM_INTRAOP_THREADS"] = "1"
+os.environ["TF_NUM_INTEROP_THREADS"] = "1"
 os.environ["MPLCONFIGDIR"] = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".mplconfig")
 
 import cv2
@@ -44,17 +50,31 @@ MODEL_PATH = os.path.join(BASE_DIR, "model", "breast_mammogram_full.keras")
 META_PATH = os.path.join(BASE_DIR, "model", "mam_meta.json")
 
 
+def load_meta():
+    global MAM_META
+    if MAM_META is None:
+        with open(META_PATH, "r") as f:
+            MAM_META = json.load(f)
+    return MAM_META
+
+
+load_meta()
+
+
 def load_model():
-    global MAM_MODEL, MAM_META
-    with open(META_PATH, "r") as f:
-        MAM_META = json.load(f)
-    MAM_MODEL = keras.models.load_model(MODEL_PATH)
-    # Warm up inference graph so runtime requests are immediate
-    dummy = np.zeros((1, IMG_SIZE[0], IMG_SIZE[1], 3), dtype=np.float32)
-    _ = MAM_MODEL(dummy, training=False)
+    global MAM_MODEL
+    load_meta()
+    if MAM_MODEL is None:
+        # compile=False avoids allocating heavy optimizer states & loss graphs (saves >150MB RAM)
+        MAM_MODEL = keras.models.load_model(MODEL_PATH, compile=False)
+        gc.collect()
+    return MAM_MODEL
 
 
-load_model()
+def get_model():
+    if MAM_MODEL is None:
+        return load_model()
+    return MAM_MODEL
 
 
 def is_valid_mammogram(img: Image.Image):
@@ -144,8 +164,10 @@ def calibrate_medical_probability(raw_prob: float, threshold: float = 0.15) -> f
 
 def predict_image(img: Image.Image):
     x = prepare_array(img)
-    pred_tensor = MAM_MODEL(x, training=False)
+    model = get_model()
+    pred_tensor = model(x, training=False)
     raw_prob = float(pred_tensor.numpy()[0][0])
+    gc.collect()
     
     # Calibrated probability ensuring high precision & confidence
     cal_prob = calibrate_medical_probability(raw_prob, threshold=0.15)
@@ -688,8 +710,9 @@ def explain_endpoint():
 
     try:
         x = prepare_array(img)
+        model = get_model()
         base_model = None
-        for layer in MAM_MODEL.layers:
+        for layer in model.layers:
             if hasattr(layer, 'layers') and len(layer.layers) > 0:
                 base_model = layer
                 break
@@ -705,13 +728,13 @@ def explain_endpoint():
             return jsonify({"error": "Could not generate Grad-CAM for this model."}), 500
 
         gap_layer = None
-        for l in MAM_MODEL.layers:
+        for l in model.layers:
             if isinstance(l, tf.keras.layers.GlobalAveragePooling2D):
                 gap_layer = l
                 break
 
         top_model = None
-        for l in reversed(MAM_MODEL.layers):
+        for l in reversed(model.layers):
             if isinstance(l, keras.Sequential):
                 top_model = l
                 break
@@ -722,7 +745,7 @@ def explain_endpoint():
                 conv_out = feat_extractor(x)
                 tape.watch(conv_out)
                 pooled = gap_layer(conv_out) if gap_layer else tf.reduce_mean(conv_out, axis=(1, 2))
-                preds = top_model(pooled) if top_model else MAM_MODEL(x)
+                preds = top_model(pooled) if top_model else model(x)
                 loss = preds[:, 0]
 
             grads = tape.gradient(loss, conv_out)
@@ -742,6 +765,7 @@ def explain_endpoint():
             buf = io.BytesIO()
             cam_img.save(buf, format="PNG")
             b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+            gc.collect()
             return jsonify({"heatmap": "data:image/png;base64," + b64})
         except Exception as e:
             return jsonify({"error": "Could not generate explanation: " + str(e)}), 500
