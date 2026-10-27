@@ -1,0 +1,28 @@
+{
+  "model": "VGG-16 Feature Extraction (Support Vector Machine (SVM)) on Mammograms (5000 trained)",
+  "classes": [
+    "benign",
+    "malignant"
+  ],
+  "img_size": [
+    224,
+    224
+  ],
+  "val_accuracy": 0.654,
+  "val_loss": 0.18,
+  "precision": 0.6896551724137931,
+  "recall": 0.56,
+  "f1": 0.6181015452538632,
+  "auc": 0.7421760000000001,
+  "confusion_matrix": {
+    "tn": 187,
+    "fp": 63,
+    "fn": 110,
+    "tp": 140
+  },
+  "n_train": {
+    "benign": 2500,
+    "malignant": 2500,
+    "total": 5000
+  }
+}

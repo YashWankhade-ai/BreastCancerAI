@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>MammoScan AI — Breast Cancer Screening from Mammograms</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="stylesheet" href="/static/css/style.css?v=5"/>
+</head>
+<body>
+
+<!-- ============ Primary Nav ============ -->
+<nav class="primary-nav">
+  <div class="nav-inner">
+    <a class="brand" href="#top">
+      <span class="brand-mark">M</span><span class="brand-text">Mammo<span class="brand-accent">Scan</span> AI</span>
+    </a>
+    <div class="nav-links">
+      <a href="#analyze">Analyze</a>
+      <a href="#how">How it works</a>
+      <a href="#dataset">Model</a>
+      <a href="#about">About</a>
+    </div>
+    <div class="nav-actions">
+      <button class="button button-primary" onclick="document.getElementById('analyze').scrollIntoView({behavior:'smooth'})">Start Screening</button>
+    </div>
+  </div>
+</nav>
+
+<!-- ============ Hero ============ -->
+<header class="hero" id="top">
+  <div class="hero-grid">
+    <div class="hero-copy">
+      <span class="eyebrow">AI-Powered Mammography · Deep Learning</span>
+      <h1 class="display-xl">Upload a mammogram.<br/>Get an instant breast-cancer screening.</h1>
+      <p class="hero-body">Drop in a breast X-ray (mammogram) and our convolutional neural network will analyze it
+      in seconds — returning a benign / malignant verdict, confidence score, risk assessment, and a detailed
+      downloadable clinical-style report.</p>
+      <div class="hero-actions">
+        <button class="button button-primary button-lg" onclick="document.getElementById('analyze').scrollIntoView({behavior:'smooth'})">
+          Analyze a mammogram
+        </button>
+        <button class="button button-secondary button-lg" onclick="document.getElementById('how').scrollIntoView({behavior:'smooth'})">
+          See how it works
+        </button>
+      </div>
+      <div class="hero-stats" id="heroStats">
+        <div class="hs"><strong>—</strong><span>Accuracy</span></div>
+        <div class="hs"><strong>—</strong><span>Images</span></div>
+        <div class="hs"><strong>—</strong><span>Model</span></div>
+        <div class="hs"><strong>—</strong><span>Task</span></div>
+      </div>
+    </div>
+    <div class="hero-visual">
+      <div class="gauge-card">
+        <div class="gauge-card-head">
+          <span class="chip chip-live"><span class="dot"></span> CNN ready</span>
+          <span class="gauge-title">Malignancy risk</span>
+        </div>
+        <svg class="gauge" viewBox="0 0 200 120" aria-label="risk gauge">
+          <path d="M 20 100 A 80 80 0 0 1 180 100" fill="none" stroke="#e5e5e0" stroke-width="14" stroke-linecap="round"/>
+          <path id="gaugeArc" d="M 20 100 A 80 80 0 0 1 180 100" fill="none" stroke="#e60023" stroke-width="14" stroke-linecap="round" style="stroke-dasharray:251;stroke-dashoffset:251"/>
+        </svg>
+        <div class="gauge-readout"><strong id="gaugePct">0.0%</strong><span>malignant</span></div>
+        <div class="gauge-labels"><span>Low</span><span>High</span></div>
+        <div class="dataset-summary" id="datasetSummary" style="margin-top:10px;font-size:11px;color:#6b7280;text-align:center;"></div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<!-- ============ Analyze section ============ -->
+<section class="section" id="analyze">
+  <div class="section-head">
+    <h2 class="heading-xl">Screening studio</h2>
+    <p class="section-sub">Upload a mammogram (breast X-ray) — JPG or PNG. The model will classify it as benign or malignant.</p>
+  </div>
+
+  <div class="analysis-grid">
+    <!-- Upload column -->
+    <div class="feature-card form-card">
+      <div class="form-toolbar">
+        <div class="form-tools">
+          <button class="button button-tertiary" id="btnClear">Clear</button>
+        </div>
+      </div>
+
+      <div class="upload-zone light" id="uploadZone">
+        <div class="up-icon">&#8679;</div>
+        <p class="body-strong">Drop your mammogram here or <span class="link">browse files</span></p>
+        <p class="body-sm">JPG / PNG · breast X-ray image</p>
+        <input type="file" id="mamFile" accept="image/*" hidden/>
+      </div>
+
+      <div class="preview-wrap" id="previewWrap" hidden>
+        <div class="preview-header">
+          <div class="preview-title">
+            <span class="chip chip-live"><span class="dot"></span> Image Preview</span>
+            <p class="preview-sub">Check if this is the correct mammogram before analyzing</p>
+          </div>
+          <button type="button" class="button button-tertiary" id="btnChangeImage">Change Image</button>
+        </div>
+        <div class="preview-frame">
+          <img id="previewImg" alt="Uploaded mammogram preview"/>
+        </div>
+        <div class="preview-meta">
+          <p class="tiny-note" id="previewName">—</p>
+          <p class="tiny-note">JPG / PNG • Ready for analysis</p>
+        </div>
+      </div>
+
+      <div class="batch-progress" id="analyzeProgress" hidden>
+        <div class="progress-bar"><div class="progress-fill" id="analyzeProgressFill"></div></div>
+        <p class="body-sm" id="analyzeProgressText">Running deep-learning model…</p>
+      </div>
+
+      <div class="form-footer">
+        <button type="button" class="button button-primary button-lg" id="btnPredict" disabled>
+          <span class="btn-label">Analyze mammogram</span>
+        </button>
+      </div>
+
+      <div id="formError" class="error-box" hidden></div>
+    </div>
+
+    <!-- Results column -->
+    <div class="results-column">
+      <div class="results-placeholder" id="resultsPlaceholder">
+        <div class="ph-icon">&#9774;</div>
+        <h3 class="heading-lg">Results will appear here</h3>
+        <p class="body-sm">Upload a mammogram and press <strong>Analyze mammogram</strong> to run the screening CNN.</p>
+      </div>
+
+      <div class="results" id="results" hidden>
+        <div class="verdict-card">
+          <div class="verdict-top">
+            <span class="chip" id="riskChip">—</span>
+            <button class="icon-btn" id="btnNew" title="New analysis">&#10005;</button>
+          </div>
+          <div class="verdict-label">AI Prediction</div>
+          <div class="verdict-value" id="verdictValue">—</div>
+          <div class="prob-row">
+            <span class="prob-label" id="labelBenign">◄ Benign</span>
+            <div class="prob-track" id="probTrack">
+              <div class="prob-center-line" title="Decision threshold (50%)"></div>
+              <div class="prob-fill" id="probFill"></div>
+              <div class="prob-marker" id="probMarker" title="Prediction value"></div>
+            </div>
+            <span class="prob-label" id="labelMalignant">Malignant ►</span>
+          </div>
+          <div class="prob-threshold-note">
+            <span>◄ Negative / Benign</span>
+            <span class="center-tag">50% Midpoint</span>
+            <span>Suspicious / Malignant ►</span>
+          </div>
+          <div class="prob-numbers">
+            <span id="benignPct">—</span>
+            <span id="malignantPct">—</span>
+          </div>
+        </div>
+
+        <div class="result-grid">
+          <div class="mini-card">
+            <div class="mini-head"><span class="chip">Confidence</span></div>
+            <div class="mini-value" id="confidence">—</div>
+            <p class="mini-sub" id="confidenceSub">Model conviction</p>
+          </div>
+          <div class="mini-card">
+            <div class="mini-head"><span class="chip">Risk level</span></div>
+            <div class="mini-value" id="riskLevel">—</div>
+            <p class="mini-sub" id="riskDesc">Screening triage status</p>
+          </div>
+        </div>
+
+        <div class="result-actions">
+          <button class="button button-secondary" id="btnPdf">&#11015;&nbsp; Download PDF</button>
+          <button class="button button-primary" id="btnReport">&#128196;&nbsp; View report</button>
+        </div>
+        <p class="tiny-note" id="resultMeta">—</p>
+      </div>
+
+      <div class="explain-card" id="explainCard" hidden>
+        <div class="explain-head">
+          <div>
+            <span class="chip">Explainable AI</span>
+            <h3 class="heading-lg">How the model analyzed this mammogram</h3>
+            <p class="body-sm">The heatmap highlights the regions that influenced the model's decision the most.</p>
+          </div>
+          <button class="button button-primary" id="btnExplain">Show Focus Map (Grad-CAM)</button>
+        </div>
+        <div class="explain-body" id="explainBody" hidden>
+          <div class="explain-grid">
+            <div class="explain-item">
+              <p class="tiny-note">Original Mammogram</p>
+              <img id="origExplain" alt="Original mammogram"/>
+            </div>
+            <div class="explain-item">
+              <p class="tiny-note">Grad-CAM Heatmap Overlay (Red = High Focus)</p>
+              <img id="heatExplain" alt="Grad-CAM heatmap overlay"/>
+            </div>
+          </div>
+          <p class="tiny-note" style="margin-top:12px">Red/orange areas indicate regions where the CNN focused most while classifying as Benign or Malignant.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ How it works ============ -->
+<section class="section section-dark" id="how">
+  <div class="section-head light">
+    <h2 class="heading-xl">How it works</h2>
+    <p class="section-sub">Three simple steps from mammogram to report.</p>
+  </div>
+  <div class="steps-grid">
+    <div class="step-card">
+      <div class="step-num">01</div>
+      <h3 class="heading-lg">Upload a mammogram</h3>
+      <p class="body-sm">Upload a breast X-ray (mammogram) image in JPG or PNG format. Any standard screening view works.</p>
+    </div>
+    <div class="step-card">
+      <div class="step-num">02</div>
+      <h3 class="heading-lg">CNN analyzes it</h3>
+      <p class="body-sm">A transfer-learning based Convolutional Neural Network (CNN) examines the mammogram and classifies it as benign or malignant.</p>
+    </div>
+    <div class="step-card">
+      <div class="step-num">03</div>
+      <h3 class="heading-lg">Get your report</h3>
+      <p class="body-sm">Review confidence and risk level — then view and download a detailed, printable clinical-style report.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ Model performance ============ -->
+<section class="section" id="dataset">
+  <div class="section-head">
+    <h2 class="heading-xl">Model performance &amp; dataset</h2>
+    <p class="section-sub" id="modelSub">Trained on the INbreast mammography dataset.</p>
+  </div>
+  <div class="metrics-grid" id="metricsGrid"></div>
+  <div class="masonry-grid">
+    <div class="feature-card soft">
+      <div class="mini-head"><span class="chip">Model details</span></div>
+      <div id="modelDetails" class="contrib-list"></div>
+    </div>
+    <div class="feature-card soft">
+      <div class="mini-head"><span class="chip">Confusion matrix (validation)</span></div>
+      <div class="cmatrix" id="confusionMatrix"></div>
+      <p class="tiny-note">Columns: predicted · Rows: actual (Benign / Malignant)</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ About / footer ============ -->
+<section class="section" id="about">
+  <div class="about-card">
+    <div class="about-copy">
+      <span class="eyebrow">About this tool</span>
+      <h2 class="heading-xl">A research-grade mammography screening studio</h2>
+      <p class="body-md">This application demonstrates a complete deep-learning pipeline — mammogram preprocessing, CNN training on a public breast-imaging dataset, and a production-style prediction API — wrapped in a calm, photography-first interface. It is intended for education and research only and is not a medical device.</p>
+      <ul class="checklist">
+        <li>Center-crop + resize to 224&times;224 before inference</li>
+        <li>MobileNetV2 transfer learning with fine-tuning</li>
+        <li>Data augmentation &amp; class weighting for imbalance</li>
+        <li>Confidence + risk-level scoring per scan</li>
+        <li>Detailed downloadable clinical-style report</li>
+      </ul>
+    </div>
+    <div class="about-logo">
+      <div class="brand brand-large"><span class="brand-mark">M</span></div>
+      <p class="body-sm">MammoScan AI</p>
+      <p class="caption">Version beta · INbreast mammography dataset</p>
+    </div>
+  </div>
+</section>
+
+<footer class="footer">
+  <div class="footer-inner">
+    <div class="footer-brand"><span class="brand-mark">M</span><span>MammoScan AI</span></div>
+    <div class="footer-cols">
+      <div class="fcol"><strong>Tool</strong><a href="#analyze">Analyze</a><a href="#dataset">Performance</a></div>
+      <div class="fcol"><strong>Resources</strong><a href="#how">How it works</a><a href="#about">About</a><a href="#top">Back to top</a></div>
+      <div class="fcol"><strong>Data</strong><span>INbreast mammography</span><span>410 labeled scans</span><span>Benign / Malignant</span></div>
+      <div class="fcol"><strong>Disclaimer</strong><span>Not a medical device</span><span>Educational use only</span><span>Consult your physician</span></div>
+    </div>
+  </div>
+  <div class="footer-bottom">
+    <span>&#169; 2026 MammoScan AI</span>
+    <span>Built on the Pinterest design system</span>
+  </div>
+</footer>
+
+<script src="/static/js/app.js?v=6"></script>
+</body>
+</html>
