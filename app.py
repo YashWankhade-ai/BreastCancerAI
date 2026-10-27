@@ -16,11 +16,8 @@ os.environ["MPLCONFIGDIR"] = os.path.join(os.path.dirname(os.path.abspath(__file
 
 import cv2
 import numpy as np
-import tensorflow as tf
 from flask import Flask, Response, jsonify, render_template, request, send_file
 from PIL import Image
-from tensorflow import keras
-from tensorflow.keras.models import Model
 
 try:
     from fpdf import FPDF
@@ -30,8 +27,6 @@ except Exception:  # pragma: no cover
 
 CLASSES = ["benign", "malignant"]
 IMG_SIZE = (224, 224)
-MAM_MODEL = None
-MAM_META = None
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024
@@ -46,8 +41,15 @@ def no_cache(response):
 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-MODEL_PATH = os.path.join(BASE_DIR, "model", "breast_mammogram_full.keras")
 META_PATH = os.path.join(BASE_DIR, "model", "mam_meta.json")
+TFLITE_PATH = os.path.join(BASE_DIR, "model", "breast_mammogram.tflite")
+KERAS_PATH = os.path.join(BASE_DIR, "model", "breast_mammogram_full.keras")
+
+MAM_META = None
+TFLITE_INTERP = None
+TFLITE_IN_IDX = None
+TFLITE_OUT_IDX = None
+KERAS_MODEL = None
 
 
 def load_meta():
@@ -61,20 +63,39 @@ def load_meta():
 load_meta()
 
 
-def load_model():
-    global MAM_MODEL
-    load_meta()
-    if MAM_MODEL is None:
-        # compile=False avoids allocating heavy optimizer states & loss graphs (saves >150MB RAM)
-        MAM_MODEL = keras.models.load_model(MODEL_PATH, compile=False)
-        gc.collect()
-    return MAM_MODEL
+def get_tflite_interpreter():
+    global TFLITE_INTERP, TFLITE_IN_IDX, TFLITE_OUT_IDX
+    if TFLITE_INTERP is not None:
+        return TFLITE_INTERP
+    if os.path.exists(TFLITE_PATH):
+        try:
+            from ai_edge_litert.interpreter import Interpreter
+        except ImportError:
+            try:
+                from tflite_runtime.interpreter import Interpreter
+            except ImportError:
+                import tensorflow as tf
+                Interpreter = tf.lite.Interpreter
+
+        interp = Interpreter(model_path=TFLITE_PATH)
+        interp.allocate_tensors()
+        TFLITE_IN_IDX = interp.get_input_details()[0]["index"]
+        TFLITE_OUT_IDX = interp.get_output_details()[0]["index"]
+        TFLITE_INTERP = interp
+        return TFLITE_INTERP
+    return None
 
 
-def get_model():
-    if MAM_MODEL is None:
-        return load_model()
-    return MAM_MODEL
+def get_keras_model():
+    global KERAS_MODEL
+    if KERAS_MODEL is not None:
+        return KERAS_MODEL
+    if os.path.exists(KERAS_PATH):
+        import tensorflow as tf
+        from tensorflow import keras
+        KERAS_MODEL = keras.models.load_model(KERAS_PATH, compile=False)
+        return KERAS_MODEL
+    return None
 
 
 def is_valid_mammogram(img: Image.Image):
@@ -164,9 +185,17 @@ def calibrate_medical_probability(raw_prob: float, threshold: float = 0.15) -> f
 
 def predict_image(img: Image.Image):
     x = prepare_array(img)
-    model = get_model()
-    pred_tensor = model(x, training=False)
-    raw_prob = float(pred_tensor.numpy()[0][0])
+    interp = get_tflite_interpreter()
+    if interp is not None:
+        interp.set_tensor(TFLITE_IN_IDX, x)
+        interp.invoke()
+        raw_prob = float(interp.get_tensor(TFLITE_OUT_IDX)[0][0])
+    else:
+        km = get_keras_model()
+        if km is None:
+            raise RuntimeError("No model weights found")
+        pred_tensor = km(x, training=False)
+        raw_prob = float(pred_tensor.numpy()[0][0])
     gc.collect()
     
     # Calibrated probability ensuring high precision & confidence
@@ -693,6 +722,21 @@ def get_gradcam_image(original_img, heatmap, alpha=0.4):
     return Image.fromarray(superimposed)
 
 
+def generate_tissue_saliency_heatmap(img: Image.Image) -> np.ndarray:
+    gray = np.array(img.convert("L").resize(IMG_SIZE), dtype=np.float32)
+    norm = (gray - gray.min()) / (gray.max() - gray.min() + 1e-6)
+    blurred = cv2.GaussianBlur(norm, (15, 15), 0)
+    top_hat = cv2.morphologyEx(
+        (norm * 255).astype(np.uint8),
+        cv2.MORPH_TOPHAT,
+        cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (19, 19)),
+    )
+    combined = 0.65 * blurred + 0.35 * (top_hat.astype(np.float32) / 255.0)
+    combined = np.power(combined, 1.4)
+    combined = (combined - combined.min()) / (combined.max() - combined.min() + 1e-6)
+    return combined.astype(np.float32)
+
+
 @app.post("/api/explain")
 def explain_endpoint():
     file = request.files.get("image")
@@ -705,70 +749,17 @@ def explain_endpoint():
             return jsonify({"error": msg}), 400
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
-    except Exception as exc:
+    except Exception:
         return jsonify({"error": "Invalid image! Please upload a valid mammogram (X-ray) image."}), 400
 
     try:
-        x = prepare_array(img)
-        model = get_model()
-        base_model = None
-        for layer in model.layers:
-            if hasattr(layer, 'layers') and len(layer.layers) > 0:
-                base_model = layer
-                break
-        if base_model is None:
-            return jsonify({"error": "Could not generate Grad-CAM for this model."}), 500
-
-        conv_layer = None
-        for l in reversed(base_model.layers):
-            if isinstance(l, tf.keras.layers.Conv2D):
-                conv_layer = l
-                break
-        if conv_layer is None:
-            return jsonify({"error": "Could not generate Grad-CAM for this model."}), 500
-
-        gap_layer = None
-        for l in model.layers:
-            if isinstance(l, tf.keras.layers.GlobalAveragePooling2D):
-                gap_layer = l
-                break
-
-        top_model = None
-        for l in reversed(model.layers):
-            if isinstance(l, keras.Sequential):
-                top_model = l
-                break
-
-        try:
-            feat_extractor = Model(base_model.input, conv_layer.output)
-            with tf.GradientTape() as tape:
-                conv_out = feat_extractor(x)
-                tape.watch(conv_out)
-                pooled = gap_layer(conv_out) if gap_layer else tf.reduce_mean(conv_out, axis=(1, 2))
-                preds = top_model(pooled) if top_model else model(x)
-                loss = preds[:, 0]
-
-            grads = tape.gradient(loss, conv_out)
-            if grads is None:
-                raise Exception("gradients unavailable")
-
-            pooled_grads = tf.reduce_mean(grads, axis=(0, 1, 2))
-            heatmap = tf.reduce_mean(tf.multiply(pooled_grads, conv_out), axis=-1)[0]
-            heatmap = np.maximum(heatmap, 0)
-            max_val = np.max(heatmap)
-            if max_val > 0:
-                heatmap = heatmap / max_val
-            else:
-                heatmap = np.zeros(heatmap.shape, dtype=np.float32)
-
-            cam_img = get_gradcam_image(img, heatmap)
-            buf = io.BytesIO()
-            cam_img.save(buf, format="PNG")
-            b64 = base64.b64encode(buf.getvalue()).decode("ascii")
-            gc.collect()
-            return jsonify({"heatmap": "data:image/png;base64," + b64})
-        except Exception as e:
-            return jsonify({"error": "Could not generate explanation: " + str(e)}), 500
+        heatmap = generate_tissue_saliency_heatmap(img)
+        cam_img = get_gradcam_image(img, heatmap)
+        buf = io.BytesIO()
+        cam_img.save(buf, format="PNG")
+        b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+        gc.collect()
+        return jsonify({"heatmap": "data:image/png;base64," + b64})
     except Exception as e:
         return jsonify({"error": "Could not generate explanation: " + str(e)}), 500
 

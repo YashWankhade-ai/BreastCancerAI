@@ -5,19 +5,7 @@ services:
     plan: free
     region: oregon
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn -w 1 --threads 2 -b 0.0.0.0:$PORT --worker-class gthread app:app --timeout 180
+    startCommand: gunicorn -w 2 -b 0.0.0.0:$PORT --timeout 120 app:app
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.9
-      - key: CUDA_VISIBLE_DEVICES
-        value: "-1"
-      - key: TF_ENABLE_ONEDNN_OPTS
-        value: "0"
-      - key: TF_CPP_MIN_LOG_LEVEL
-        value: "3"
-      - key: OMP_NUM_THREADS
-        value: "1"
-      - key: TF_NUM_INTRAOP_THREADS
-        value: "1"
-      - key: TF_NUM_INTEROP_THREADS
-        value: "1"

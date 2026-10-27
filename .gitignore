@@ -24,7 +24,7 @@ Thumbs.db
 data/raw/
 data/mam_5000/
 model/vgg16_features_cache.npz
-model/*.tflite
+model/breast_mammogram_full.keras
 uploads/
 
 # Retain data/mam/ for sample verification
