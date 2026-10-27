@@ -82,7 +82,7 @@ def run_tests():
     print("  >> PASSED: Benign mammogram predicted with high conviction (>90%) and Low Risk.")
 
     # 6. Invalid Non-Mammogram Image Rejection
-    print("\n[TEST 6/8] POST /api/predict_image (Invalid Colored Photo Rejection)")
+    print("\n[TEST 6/8] POST /api/predict_image (Invalid Colored Photo & Object Rejection)")
     color_arr = np.zeros((224, 224, 3), dtype=np.uint8)
     color_arr[:, :, 0] = 255  # Solid red
     buf = io.BytesIO()
@@ -90,10 +90,24 @@ def run_tests():
     buf.seek(0)
     res = client.post("/api/predict_image", data={"image": (buf, "color_photo.jpg")}, content_type="multipart/form-data")
     err_data = res.get_json()
-    print("  Status:", res.status_code, "| Message:", err_data.get("error"))
-    assert res.status_code == 400 and "Invalid image" in err_data.get("error", "")
+    print("  Color Photo Status:", res.status_code, "| Message:", err_data.get("error"))
+    assert res.status_code == 400 and ("Color image" in err_data.get("error", "") or "Invalid image" in err_data.get("error", ""))
+
+    # Test grayscale headphone/mechanical shape rejection
+    hp_black = np.full((300, 300), 10, dtype=np.uint8)
+    import cv2
+    cv2.circle(hp_black, (70, 150), 45, 180, -1)
+    cv2.circle(hp_black, (230, 150), 45, 180, -1)
+    cv2.ellipse(hp_black, (150, 120), (80, 60), 0, 180, 360, 150, 15)
+    buf2 = io.BytesIO()
+    Image.fromarray(hp_black).save(buf2, format="JPEG")
+    buf2.seek(0)
+    res2 = client.post("/api/predict_image", data={"image": (buf2, "headphones.jpg")}, content_type="multipart/form-data")
+    err_data2 = res2.get_json()
+    print("  Headphones Status:", res2.status_code, "| Message:", err_data2.get("error"))
+    assert res2.status_code == 400
     tests_passed += 1
-    print("  >> PASSED: Non-mammogram successfully rejected.")
+    print("  >> PASSED: Both colored photos and mechanical non-mammogram objects (headphones) rejected.")
 
     # 7. Grad-CAM Explainable AI Heatmap
     print("\n[TEST 7/8] POST /api/explain (Grad-CAM Saliency Map)")

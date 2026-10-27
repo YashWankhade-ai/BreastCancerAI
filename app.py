@@ -100,42 +100,99 @@ def get_keras_model():
 
 def is_valid_mammogram(img: Image.Image):
     try:
-        # Check basic properties
         w, h = img.size
-        # Allow square and rectangular mammogram images (datasets often use 512x512)
         aspect_ratio = max(w, h) / min(w, h) if min(w, h) > 0 else 1
-        if aspect_ratio > 4.0:
-            return False, "Invalid image! Please upload a valid mammogram (X-ray) image."
-        
-        # Convert to grayscale for analysis
-        gray = img.convert('L')
-        arr = np.array(gray)
-        
-        # Check if image is mostly grayscale (low color variance)
-        if img.mode == 'RGB':
+        if aspect_ratio > 3.0:
+            return False, "Invalid image dimensions. Please upload a standard medical mammogram (breast X-ray)."
+
+        # 1. Color check - mammograms are strictly grayscale X-rays
+        if img.mode == "RGB":
             r, g, b = img.split()
-            r_arr = np.array(r)
-            g_arr = np.array(g)
-            b_arr = np.array(b)
-            # Check if channels are similar (grayscale images have similar R,G,B)
-            diff_rg = np.mean(np.abs(r_arr.astype(float) - g_arr.astype(float)))
-            diff_rb = np.mean(np.abs(r_arr.astype(float) - b_arr.astype(float)))
-            if diff_rg > 15 or diff_rb > 15:
-                return False, "Invalid image! Please upload a valid mammogram (X-ray) image."
-        
-        # Check image statistics - mammograms have specific characteristics
+            r_arr = np.array(r, dtype=float)
+            g_arr = np.array(g, dtype=float)
+            b_arr = np.array(b, dtype=float)
+            diff_rg = np.mean(np.abs(r_arr - g_arr))
+            diff_rb = np.mean(np.abs(r_arr - b_arr))
+            if diff_rg > 8 or diff_rb > 8:
+                return False, "Invalid image: Color image detected. Screening requires an authentic grayscale breast mammogram (X-ray)."
+
+        # 2. Convert to grayscale array
+        gray = img.convert("L")
+        arr = np.array(gray)
+
+        # 3. Overall intensity distribution
         mean_val = np.mean(arr)
         std_val = np.std(arr)
-        # Very bright or very dark images are suspicious
-        if mean_val < 10 or mean_val > 245:
-            return False, "Invalid image! Please upload a valid mammogram (X-ray) image."
-        # Low contrast images are suspicious
-        if std_val < 10:
-            return False, "Invalid image! Please upload a valid mammogram (X-ray) image."
-        
+        if mean_val < 10 or mean_val > 220 or std_val < 15:
+            return False, "Invalid contrast/exposure. The image does not match medical X-ray attenuation standards."
+
+        # 4. Radiologic detector background check:
+        # A true mammogram has unattenuated air regions (deep black pixels < 28)
+        # covering between 10% and 82% of the detector frame.
+        black_ratio = np.mean(arr < 28)
+        if black_ratio < 0.10:
+            return False, "Missing dark X-ray background field. Everyday photos and non-radiologic objects are rejected."
+        if black_ratio > 0.85:
+            return False, "Insufficient breast parenchyma detected in the field of view."
+
+        # 5. Check corners: In a mammogram, at least 1 corner must be empty dark background
+        h_part, w_part = max(10, int(h * 0.1)), max(10, int(w * 0.1))
+        corners = [
+            arr[:h_part, :w_part],
+            arr[:h_part, -w_part:],
+            arr[-h_part:, :w_part:],
+            arr[-h_part:, -w_part:],
+        ]
+        dark_corners = sum(1 for c in corners if np.mean(c < 30) > 0.40)
+        if dark_corners < 1:
+            return False, "Non-mammogram detected: missing dark radiologic margin borders."
+
+        # 6. Anatomical Chest Wall Attachment check:
+        # Biological breast tissue in CC or MLO views is attached to the chest wall/torso,
+        # meaning at least ONE image border has extensive continuous tissue coverage (>= 35%).
+        # Random objects (headphones, gadgets, faces, cups) float in the center or lack chest wall anchors.
+        top_tissue = np.mean(arr[0, :] > 25)
+        bottom_tissue = np.mean(arr[-1, :] > 25)
+        left_tissue = np.mean(arr[:, 0] > 25)
+        right_tissue = np.mean(arr[:, -1] > 25)
+        max_edge_tissue = max(top_tissue, bottom_tissue, left_tissue, right_tissue)
+        if max_edge_tissue < 0.35:
+            return False, "Non-mammogram detected: missing anatomical chest-wall anchor characteristic of breast X-rays."
+
+        min_edge_tissue = min(top_tissue, bottom_tissue, left_tissue, right_tissue)
+        if min_edge_tissue > 0.60:
+            return False, "Tissue fills all four borders. Mammograms project into an open air field."
+
+        # 7. Contour and Structural Analysis
+        thresh = cv2.threshold(arr, 25, 255, cv2.THRESH_BINARY)[1]
+        cnts, hierarchy = cv2.findContours(thresh, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
+        if not cnts:
+            return False, "No anatomical breast tissue profile identified."
+
+        total_pixels = arr.shape[0] * arr.shape[1]
+        # Check for large hollow internal holes (typical in headphones, loops, glasses)
+        if hierarchy is not None:
+            for idx, h_info in enumerate(hierarchy[0]):
+                parent = h_info[3]
+                if parent != -1:
+                    hole_area = cv2.contourArea(cnts[idx])
+                    if hole_area > 0.03 * total_pixels:
+                        return False, "Mechanical loop or hollow object detected. Only authentic breast mammograms are permitted."
+
+        main_area = max(cv2.contourArea(c) for c in cnts)
+        main_ratio = main_area / total_pixels
+        if main_ratio < 0.15:
+            return False, "No significant breast anatomical structure detected."
+
+        # 8. Edge & Texture Analysis (Organic soft-tissue vs mechanical sharp edges)
+        edges = cv2.Canny(arr, 50, 150)
+        edge_density = np.mean(edges > 0)
+        if edge_density > 0.05:
+            return False, "High-frequency mechanical edges detected. Please upload an authentic medical mammogram."
+
         return True, None
-    except Exception:
-        return False, "Invalid image! Please upload a valid mammogram (X-ray) image."
+    except Exception as e:
+        return False, "Invalid image format for screening: " + str(e)
 
 
 def load_image(file_storage) -> Image.Image:
