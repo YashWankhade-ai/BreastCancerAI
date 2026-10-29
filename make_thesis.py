@@ -1,7 +1,6 @@
 from docx import Document
 from docx.shared import Inches, Pt, Cm
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
-from docx.enum.style import WD_STYLE_TYPE
 import os
 
 BASE = os.path.dirname(os.path.abspath(__file__))
@@ -215,7 +214,7 @@ for i, ppath in enumerate(photos, 1):
     r = p.add_run()
     try:
         r.add_picture(ppath, width=Inches(5.0))
-    except Exception as e:
+    except Exception:
         pass
     doc.add_paragraph(f"Photograph 5.{i}: Web Application Interface").alignment = WD_ALIGN_PARAGRAPH.CENTER
     doc.add_paragraph()

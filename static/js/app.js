@@ -246,7 +246,6 @@ function renderResult(data) {
 
   // Bi-Directional Center-Originating Prediction Bar (50% center)
   const malPct = Math.max(0.005, Math.min(0.995, data.malignant_pct));
-  const benPct = Math.max(0.005, Math.min(0.995, data.benign_pct));
   
   const fill = $("#probFill");
   const marker = $("#probMarker");

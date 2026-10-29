@@ -3,7 +3,7 @@ import random
 import shutil
 import json
 import numpy as np
-from PIL import Image, ImageEnhance, ImageFilter
+from PIL import Image, ImageEnhance
 import cv2
 
 ROOT = os.path.dirname(os.path.abspath(__file__))

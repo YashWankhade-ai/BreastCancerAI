@@ -91,7 +91,6 @@ def get_keras_model():
     if KERAS_MODEL is not None:
         return KERAS_MODEL
     if os.path.exists(KERAS_PATH):
-        import tensorflow as tf
         from tensorflow import keras
         KERAS_MODEL = keras.models.load_model(KERAS_PATH, compile=False)
         return KERAS_MODEL
@@ -201,14 +200,6 @@ def load_image(file_storage) -> Image.Image:
     except Exception:
         raise ValueError("Uploaded file is not a valid image (JPG / PNG expected).")
     return img
-
-
-def crop_center(img: Image.Image) -> Image.Image:
-    w, h = img.size
-    side = min(w, h)
-    left = (w - side) // 2
-    top = (h - side) // 2
-    return img.crop((left, top, left + side, top + side))
 
 
 def prepare_array(img: Image.Image) -> np.ndarray:
@@ -589,8 +580,6 @@ LIGHT = (246, 246, 243)
 
 def build_pdf_report(result, img: Image.Image, filename):
     """Return a bytes object containing a rendered PDF report."""
-    from fpdf import FPDF
-
     mp = result["malignant_pct"]
     bp = result["benign_pct"]
     verdict_color = RED if result["code"] == "M" else DARK_GREEN
@@ -840,7 +829,6 @@ def report_pdf_endpoint():
         return jsonify({"error": "Invalid image! Please upload a valid mammogram (X-ray) image."}), 400
     try:
         result = predict_image(img)
-        result["risk_color_hex"] = hex_to_rgb(result["risk_color"])
         data = build_pdf_report(result, img, file.filename)
     except Exception as exc:  # pragma: no cover
         return jsonify({"error": "PDF generation failed: " + str(exc)}), 500
